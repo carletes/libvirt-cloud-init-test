@@ -1,0 +1,116 @@
+#!/usr/bin/env python
+
+from __future__ import print_function
+
+import argparse
+import os
+import subprocess
+import sys
+
+
+CLOUD_INIT_TEMPLATE = r'''
+#cloud-config
+
+ssh_authorized_keys:
+  - {ssh_key}
+'''.lstrip()
+
+
+def run(*cmdline):
+    cmdline = ' '.join(str(a) for a in cmdline)
+    print('+ {}'.format(cmdline), file=sys.stderr)
+    p = subprocess.Popen(cmdline, shell=True)
+    return p.wait()
+
+
+def create_cloud_init_disk(vm_name, ssh_key):
+    meta_data = 'meta-data'
+    with open(meta_data, 'wt') as f:
+        f.write('instance-id: id-{}\n'.format(vm_name))
+        f.write('local-hostname: {}\n'.format(vm_name))
+
+    user_data = 'user-data'
+    with open(user_data, 'wt') as f:
+        f.write(CLOUD_INIT_TEMPLATE.format(
+            ssh_key=ssh_key,
+        ))
+
+    cloud_init_disk = '{}-cloud-init.iso'.format(vm_name)
+    rc = run(
+        'genisoimage',
+        '-o', cloud_init_disk,
+        '-V cidata',
+        '-r',
+        '-J',
+        '-quiet',
+        meta_data,
+        user_data,
+    )
+
+    for f in meta_data, user_data:
+        os.unlink(f)
+
+    return rc, cloud_init_disk
+
+
+def create_vm(name, image, memory, cpus, network, disk_size, os_type, os_variant, ssh_key):
+    disk_path = '{}.img'.format(name)
+    rc = run('cp', image, disk_path)
+    if rc:
+        return rc
+
+    rc = run('qemu-img resize -q', disk_path, '{}G'.format(disk_size))
+    if rc:
+        return rc
+
+    rc, cloud_init_disk = create_cloud_init_disk(name, ssh_key)
+    if rc:
+        return rc
+
+    return run(
+        'virt-install',
+        '--name', name,
+        '--memory', memory,
+        '--vcpus', cpus,
+        '--cpu host',
+        '--disk path={},device=disk,bus=virtio'.format(disk_path),
+        '--disk path={},device=cdrom'.format(cloud_init_disk),
+        '--import',
+        '--network network={}'.format(network),
+        '--graphics none',
+        '--os-type', os_type,
+        '--os-variant', os_variant,
+        '--noautoconsole',
+    )
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument('name')
+    p.add_argument('image', metavar='PATH')
+    p.add_argument('--cpus', type=int, default=1)
+    p.add_argument('--disk-size', type=int, default=10)
+    p.add_argument('--memory', type=int, default=1024)
+    p.add_argument('--network', default='default')
+    p.add_argument('--os-type', default='linux')
+    p.add_argument('--os-variant', default='ubuntu17.10')
+    p.add_argument('--ssh-key', default='~/.ssh/id_rsa.pub')
+
+    args = p.parse_args()
+
+    with open(os.path.expanduser(args.ssh_key), 'rt') as f:
+        ssh_key = f.read().strip()
+
+    return create_vm(args.name,
+                     args.image,
+                     args.memory,
+                     args.cpus,
+                     args.network,
+                     args.disk_size,
+                     args.os_type,
+                     args.os_variant,
+                     ssh_key)
+
+
+if __name__ == '__main__':
+    sys.exit(main())
