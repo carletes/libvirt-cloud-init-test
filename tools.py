@@ -1,20 +1,14 @@
 from __future__ import print_function
 
-import argparse
 import os
-import sys
 
 import libvirt
 
 
-POOL_XML_TEMPLATE = '''
-<pool type="dir">
-  <name>{name}</name>
-  <target>
-    <path>{path}</path>
-  </target>
-</pool>
-'''
+__all__ = [
+    'Pool',
+]
+
 
 VOLUME_XML_TEMPLATE = '''
 <volume>
@@ -51,6 +45,16 @@ class Volume(object):
                     break
                 stream.send(data)
             stream.finish()
+
+
+POOL_XML_TEMPLATE = '''
+<pool type="dir">
+  <name>{name}</name>
+  <target>
+    <path>{path}</path>
+  </target>
+</pool>
+'''
 
 
 class Pool(object):
@@ -105,27 +109,3 @@ class Pool(object):
         if self._pool is None:
             raise Exception('Pool {} not initialized'.format(self))
         return self._pool
-
-
-def upload(src, pool, pool_home, dest):
-    path = os.path.join(os.path.expanduser(pool_home), pool)
-    if dest is None:
-        dest = os.path.basename(src)
-    with Pool(pool, path) as p:
-        p.upload(src, dest)
-
-
-def main():
-    p = argparse.ArgumentParser()
-    p.add_argument('src')
-    p.add_argument('pool')
-    p.add_argument('--dest')
-    p.add_argument('--pool-home', default='~/.libvirt/pools')
-
-    args = p.parse_args()
-
-    return upload(args.src, args.pool, args.pool_home, args.dest)
-
-
-if __name__ == '__main__':
-    sys.exit(main())
